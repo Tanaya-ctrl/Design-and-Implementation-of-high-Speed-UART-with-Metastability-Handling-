@@ -1,0 +1,2 @@
+# Design-and-Implementation-of-high-Speed-UART-with-Metastability-Handling-
+High-speed UART transceiver (4 Mbps, 100 MHz) designed in Verilog for Spartan-7 FPGA, featuring a two-stage flip-flop synchronizer with ASYNC_REG constraints for metastability handling in clock-domain crossing. Includes Tx/Rx FSMs, PISO/SIPO registers, parity checking, and a metastability-injection testbench validated in Vivado.
