@@ -1,0 +1,198 @@
+module tb();
+
+    // Parameters
+    parameter TX_CLOCK_FREQ = 100_000_000;
+    parameter RX_CLOCK_FREQ = 100_010_000;
+    parameter BAUD_RATE = 4_000_000;
+    parameter DATA_BITS = 8;
+    parameter PARITY = "even";
+    parameter STOP_BITS = 1;
+    parameter ENABLE_CDC = 1;
+    
+    // CHANGE THIS TO TEST DIFFERENT SCENARIOS
+    // 0 = Normal operation with synchronizer (should have 100% success)
+    // 1 = Inject metastability errors (simulates no synchronizer - will show errors)
+    parameter INJECT_META = 0;  // <-- CHANGE THIS
+    
+    parameter real TX_CLK_PERIOD = 10.0;
+    parameter real RX_CLK_PERIOD = 9.999000099990;
+    parameter NUM_TESTS = 20;
+    
+    // Signals
+    reg tx_clk;
+    reg rx_clk;
+    reg rst;
+    reg [DATA_BITS-1:0] tx_data;
+    reg tx_enable;
+    wire [DATA_BITS-1:0] rx_data;
+    wire rx_valid;
+    wire rx_parity_error;
+    wire tx_busy;
+    
+    // Test tracking
+    reg [DATA_BITS-1:0] expected_data [0:NUM_TESTS-1];
+    integer test_index;
+    integer success_count = 0;
+    integer error_count = 0;
+    integer meta_event_count = 0;
+    integer rx_count = 0;
+    
+    // Instantiate DUT
+    UART_ma #(
+        .TX_CLOCK_FREQ(TX_CLOCK_FREQ),
+        .RX_CLOCK_FREQ(RX_CLOCK_FREQ),
+        .BAUD_RATE(BAUD_RATE),
+        .DATA_BITS(DATA_BITS),
+        .PARITY(PARITY),
+        .STOP_BITS(STOP_BITS),
+        .ENABLE_CDC(ENABLE_CDC),
+        .INJECT_META(INJECT_META)  // NEW: Control error injection
+    ) dut (
+        .tx_clk(tx_clk),
+        .rx_clk(rx_clk),
+        .rst(rst),
+        .tx_data(tx_data),
+        .tx_enable(tx_enable),
+        .rx_data(rx_data),
+        .rx_valid(rx_valid),
+        .rx_parity_error(rx_parity_error),
+        .tx_busy(tx_busy)
+    );
+    
+    // Clock generation
+    initial begin
+        tx_clk = 0;
+        forever #(TX_CLK_PERIOD/2) tx_clk = ~tx_clk;
+    end
+    
+    initial begin
+        rx_clk = 0;
+        forever #(RX_CLK_PERIOD/2) rx_clk = ~rx_clk;
+    end
+    
+    // Reset generation
+    initial begin
+        rst = 1;
+        tx_enable = 0;
+        tx_data = 0;
+        #1000;
+        rst = 0;
+        #1000;
+    end
+    
+    // Test stimulus
+    initial begin
+        wait(rst == 0);
+        #5000;
+        
+        $display("========================================");
+        $display("UART CDC Metastability Test");
+        $display("========================================");
+        $display("TX Clock: %0d MHz, Period: %0.3f ns", TX_CLOCK_FREQ/1000000, TX_CLK_PERIOD);
+        $display("RX Clock: %0.2f MHz, Period: %0.6f ns", RX_CLOCK_FREQ/1000000.0, RX_CLK_PERIOD);
+        $display("TX Baud Rate: %0d Mbps (%0d clocks/bit)", BAUD_RATE/1000000, TX_CLOCK_FREQ/BAUD_RATE);
+        $display("RX Baud Rate: %0d Mbps (%0d clocks/bit)", BAUD_RATE/1000000, RX_CLOCK_FREQ/BAUD_RATE);
+        $display("Clock Domain Crossing: %s", ENABLE_CDC ? "ENABLED" : "DISABLED");
+        $display("2-Stage Synchronizer: ENABLED");
+        $display("Metastability Injection: %s", INJECT_META ? "ENABLED (Simulating NO sync)" : "DISABLED (Normal operation)");
+        $display("========================================\n");
+        
+        if (INJECT_META) begin
+            $display("*** WARNING: Metastability injection ENABLED ***");
+            $display("*** This simulates the effect of NO synchronizer ***");
+            $display("*** Expect to see ERRORS in received data ***\n");
+        end else begin
+            $display("*** Normal operation with 2-stage synchronizer ***");
+            $display("*** Expect HIGH success rate ***\n");
+        end
+        
+        // Send test data
+        for (test_index = 0; test_index < NUM_TESTS; test_index = test_index + 1) begin
+            tx_data = $random & 8'hFF;
+            expected_data[test_index] = tx_data;
+            
+            wait(tx_busy == 0);
+            #100;
+            
+            @(posedge tx_clk);
+            tx_enable = 1;
+            @(posedge tx_clk);
+            tx_enable = 0;
+            
+            $display("Time: %0t ns | TX: Sending 0x%h (%0d)", 
+                     $time, tx_data, tx_data);
+            
+            #4000;
+        end
+        
+        // Wait for all receptions
+        #30000;
+        
+        // Print summary
+        $display("\n========================================");
+        $display("Test Summary:");
+        $display("----------------------------------------");
+        $display("Mode: %s", INJECT_META ? "WITH Metastability Injection" : "Normal Synchronized Operation");
+        $display("Total Tests Sent:          %0d", NUM_TESTS);
+        $display("Total Received:            %0d", rx_count);
+        $display("Successful Transmissions:  %0d / %0d", success_count, NUM_TESTS);
+        $display("Failed Transmissions:      %0d / %0d", error_count, NUM_TESTS);
+        $display("Metastability Events:      %0d", meta_event_count);
+        
+        if (rx_count > 0)
+            $display("Success Rate:              %0d%%", (success_count * 100) / rx_count);
+        else
+            $display("Success Rate:              0%% (NO DATA RECEIVED!)");
+        
+        $display("========================================");
+        
+        if (INJECT_META) begin
+            if (error_count > 0) begin
+                $display("\n*** DEMONSTRATION SUCCESSFUL ***");
+                $display("*** Errors shown prove the need for CDC synchronizers ***");
+                $display("*** Without proper synchronization, metastability causes data corruption ***");
+            end else begin
+                $display("\n*** No errors detected - try running again (random injection) ***");
+            end
+        end else begin
+            if (rx_count == 0) begin
+                $display("\nERROR: No data received!");
+            end else if (success_count == NUM_TESTS) begin
+                $display("\n*** SUCCESS: 2-stage synchronizer working perfectly! ***");
+                $display("*** All data transmitted correctly across clock domains ***");
+            end else if (success_count >= (NUM_TESTS * 95 / 100)) begin
+                $display("\nGOOD: >95%% success rate!");
+            end
+        end
+        
+        #10000;
+        $finish;
+    end
+    
+    // Monitor received data
+    always @(posedge rx_clk) begin
+        if (rx_valid) begin
+            if (rx_count < NUM_TESTS) begin
+                if (rx_data == expected_data[rx_count]) begin
+                    if (rx_parity_error) begin
+                        $display("Time: %0t ns | RX: Received 0x%h - DATA CORRECT but PARITY ERROR", 
+                                 $time, rx_data);
+                        error_count = error_count + 1;
+                        meta_event_count = meta_event_count + 1;
+                    end else begin
+                        $display("Time: %0t ns | RX: Received 0x%h - ✓ SUCCESS", 
+                                 $time, rx_data);
+                        success_count = success_count + 1;
+                    end
+                end else begin
+                    $display("Time: %0t ns | RX: Received 0x%h - ✗ ERROR (Expected: 0x%h, Parity: %0b)", 
+                             $time, rx_data, expected_data[rx_count], rx_parity_error);
+                    error_count = error_count + 1;
+                    meta_event_count = meta_event_count + 1;
+                end
+                rx_count = rx_count + 1;
+            end
+        end
+    end
+
+endmodule
