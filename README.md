@@ -1,15 +1,23 @@
-# Design-and-Implementation-of-high-Speed-UART-with-Metastability-Handling-
-High-speed UART transceiver (4 Mbps, 100 MHz) designed in Verilog for Spartan-7 FPGA, featuring a two-stage flip-flop synchronizer with ASYNC_REG constraints for metastability handling in clock-domain crossing. Includes Tx/Rx FSMs, PISO/SIPO registers, parity checking, and a metastability-injection testbench validated in Vivado.
+# High-Speed UART with Metastability Handling
 
+Verilog implementation of a high-speed UART transmitter/receiver on a Spartan-7 FPGA, operating at **4 Mbps** with a **100 MHz** clock. The core focus of this project is **clock domain crossing (CDC)** — specifically, detecting and resolving **metastability** that arises when the transmitter and receiver run on independent, non-synchronous clocks.
+
+Designed, simulated, and synthesized in **Xilinx Vivado**.
+
+> 📄 Based on the IEEE IGNITE-2026 paper *"Design of High-Speed UART Transmission with Metastability Handling"* (Paper ID: 725), co-authored under the guidance of Dr. Seema Rajput, and supported by the MeitY Chips to Startup (C2S) grant.
+
+---
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Repository Structure](#repository-structure)
 - [System Architecture](#system-architecture)
 - [How It Works](#how-it-works)
 - [Metastability: The Core Problem](#metastability-the-core-problem)
 - [Two-Stage Synchronizer Solution](#two-stage-synchronizer-solution)
 - [Verification Strategy](#verification-strategy)
+- [Running the Simulation](#running-the-simulation)
 - [Results](#results)
 - [Tools Used](#tools-used)
 - [Limitations](#limitations)
@@ -28,6 +36,23 @@ This project implements a UART transmitter and receiver pair that:
 - Frames data into **11-bit frames**: `1 start bit + 8 data bits + 1 parity bit + 1 stop bit`
 - Explicitly detects and resolves **metastability** caused by clock domain crossing
 - Is verified through **simulation with injected metastability** to quantitatively prove the synchronizer works
+
+---
+
+## Repository Structure
+
+```
+uart-metastability/
+├── README.md
+├── LICENSE
+├── .gitignore
+├── src/
+│   ├── uart_tx.v       # UART transmitter (FSM + serialization)
+│   ├── uart_rx.v       # UART receiver with 2-stage synchronizer + metastability injection
+│   └── UART_ma.v       # Top-level module wiring uart_tx + uart_rx together
+└── sim/
+    └── uart_tb.v       # Self-checking testbench (20 random bytes, pass/fail tracking)
+```
 
 ---
 
@@ -118,11 +143,42 @@ To *prove* the synchronizer works (rather than just asserting it), the testbench
 
 ---
 
+## Running the Simulation
+
+This design was verified using **Icarus Verilog** (open-source, free to install) in addition to Vivado. To run it yourself:
+
+```bash
+# Compile
+iverilog -g2012 -o sim_out src/uart_tx.v src/uart_rx.v src/UART_ma.v sim/uart_tb.v
+
+# Run
+vvp sim_out
+```
+
+By default, `INJECT_META` is set to `0` in `sim/uart_tb.v`, which runs the **normal mode** — expect a **100% success rate** with 0 metastability events.
+
+To see the failure mode (no synchronizer protection), open `sim/uart_tb.v` and change:
+```verilog
+parameter INJECT_META = 0;  // change to 1
+```
+Re-compile and re-run — you should see corrupted bytes, mismatches against expected data, and a rising `meta_event_count`, exactly as described below.
+
+---
+
 ## Results
 
-- **With synchronizer enabled (`INJECT_META = 0`):** every byte sent on `tx_data[7:0]` was correctly recovered on `rx_data[7:0]`; `rx_valid` pulses aligned cleanly with each frame; zero mismatches despite the clock drift.
-- **With synchronizer disabled / metastability injected (`INJECT_META = 1`):** the same clock offset caused bits to be sampled mid-transition, producing corrupted bytes, mismatches against `expected_data`, and a rising `meta_event_count`.
-- Post-synthesis schematic confirms a true asynchronous architecture — `uart_tx` and `uart_rx` share no clock net; each runs off its own `tx_clk` / `rx_clk` via `BUFG` primitives, with `IBUF`/`OBUF` handling the parallel-to-serial boundary.
+Verified directly against this repository's code (Icarus Verilog, 20-byte randomized test):
+
+| | Normal mode (`INJECT_META = 0`) | Injection mode (`INJECT_META = 1`) |
+|---|---|---|
+| Bytes sent | 20 | 20 |
+| Bytes received correctly | **20 / 20** | **0 / 20** |
+| Metastability events | 0 | 20 |
+| Success rate | **100%** | **0%** |
+
+- **With the 2-stage synchronizer active:** every byte sent on `tx_data[7:0]` was correctly recovered on `rx_data[7:0]` despite the deliberate clock drift between `tx_clk` (100 MHz) and `rx_clk` (100.01 MHz).
+- **With metastability injected:** every byte was corrupted — a stark, reproducible demonstration of why CDC synchronization isn't optional in asynchronous designs.
+- Post-synthesis schematic (Vivado) confirms a true asynchronous architecture — `uart_tx` and `uart_rx` share no clock net; each runs off its own clock via `BUFG` primitives, with `IBUF`/`OBUF` handling the parallel-to-serial boundary.
 
 ---
 

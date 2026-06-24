@@ -1,0 +1,63 @@
+# ===== Xilinx Vivado project files =====
+*.jou
+*.log
+*.str
+*.zip
+*.backup.jou
+*.backup.log
+
+# Vivado run/working directories
+.Xil/
+*.runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
+*.srcs/sources_1/bd/
+*.gen/
+
+# Generated reports & summaries
+*.rpt
+*.vds
+*.pb
+usage_statistics_webtalk.html
+usage_statistics_webtalk.xml
+
+# Synthesis / implementation checkpoints
+*.dcp
+
+# Bitstream & programming files
+*.bit
+*.bin
+*.mcs
+*.prm
+*.ltx
+
+# Project-specific Vivado lock/journal files
+vivado*.jou
+vivado*.log
+vivado_pid*.str
+
+# ===== Simulation outputs =====
+*.vcd
+*.wdb
+*.wcfg
+*.fsm
+xsim.dir/
+webtalk*.log
+webtalk*.jou
+
+# ===== OS-specific junk =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Editor / IDE clutter =====
+.vscode/
+.idea/
+*.swp
+*~
+
+# ===== Misc =====
+*.tmp
+*.bak
