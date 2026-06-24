@@ -3,9 +3,6 @@
 Verilog implementation of a high-speed UART transmitter/receiver on a Spartan-7 FPGA, operating at **4 Mbps** with a **100 MHz** clock. The core focus of this project is **clock domain crossing (CDC)** — specifically, detecting and resolving **metastability** that arises when the transmitter and receiver run on independent, non-synchronous clocks.
 
 Designed, simulated, and synthesized in **Xilinx Vivado**.
-
-> 📄 Based on the IEEE IGNITE-2026 paper *"Design of High-Speed UART Transmission with Metastability Handling"* (Paper ID: 725), co-authored under the guidance of Dr. Seema Rajput, and supported by the MeitY Chips to Startup (C2S) grant.
-
 ---
 
 ## Table of Contents
