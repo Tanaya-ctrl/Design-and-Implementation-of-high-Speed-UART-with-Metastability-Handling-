@@ -1,0 +1,119 @@
+// ============================================================================
+// UART TRANSMITTER MODULE
+// ============================================================================
+module uart_tx #(
+    parameter CLOCK_FREQ = 100_000_000,
+    parameter BAUD_RATE = 4_000_000,
+    parameter DATA_BITS = 8,
+    parameter PARITY = "even",
+    parameter STOP_BITS = 1
+)(
+    input wire clk,
+    input wire rst,
+    input wire [DATA_BITS-1:0] data_in,
+    input wire tx_enable,
+    output reg serial_out,
+    output reg busy
+);
+
+    localparam CLKS_PER_BIT = CLOCK_FREQ / BAUD_RATE;
+    
+    localparam IDLE = 3'b000;
+    localparam START = 3'b001;
+    localparam DATA = 3'b010;
+    localparam PARITY_STATE = 3'b011;
+    localparam STOP = 3'b100;
+    
+    reg [2:0] state;
+    reg [15:0] clk_count;
+    reg [3:0] bit_index;
+    reg [DATA_BITS-1:0] tx_data;
+    reg parity_bit;
+    
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            state <= IDLE;
+            serial_out <= 1'b1;
+            busy <= 1'b0;
+            clk_count <= 0;
+            bit_index <= 0;
+            tx_data <= 0;
+            parity_bit <= 0;
+        end else begin
+            case (state)
+                IDLE: begin
+                    serial_out <= 1'b1;
+                    busy <= 1'b0;
+                    clk_count <= 0;
+                    bit_index <= 0;
+                    
+                    if (tx_enable) begin
+                        tx_data <= data_in;
+                        busy <= 1'b1;
+                        state <= START;
+                        
+                        if (PARITY == "even")
+                            parity_bit <= ^data_in;
+                        else if (PARITY == "odd")
+                            parity_bit <= ~(^data_in);
+                    end
+                end
+                
+                START: begin
+                    serial_out <= 1'b0;
+                    
+                    if (clk_count == CLKS_PER_BIT - 1) begin
+                        clk_count <= 0;
+                        state <= DATA;
+                    end else begin
+                        clk_count <= clk_count + 1;
+                    end
+                end
+                
+                DATA: begin
+                    serial_out <= tx_data[bit_index];
+                    
+                    if (clk_count == CLKS_PER_BIT - 1) begin
+                        clk_count <= 0;
+                        
+                        if (bit_index == DATA_BITS - 1) begin
+                            bit_index <= 0;
+                            if (PARITY != "none")
+                                state <= PARITY_STATE;
+                            else
+                                state <= STOP;
+                        end else begin
+                            bit_index <= bit_index + 1;
+                        end
+                    end else begin
+                        clk_count <= clk_count + 1;
+                    end
+                end
+                
+                PARITY_STATE: begin
+                    serial_out <= parity_bit;
+                    
+                    if (clk_count == CLKS_PER_BIT - 1) begin
+                        clk_count <= 0;
+                        state <= STOP;
+                    end else begin
+                        clk_count <= clk_count + 1;
+                    end
+                end
+                
+                STOP: begin
+                    serial_out <= 1'b1;
+                    
+                    if (clk_count == CLKS_PER_BIT - 1) begin
+                        clk_count <= 0;
+                        state <= IDLE;
+                    end else begin
+                        clk_count <= clk_count + 1;
+                    end
+                end
+                
+                default: state <= IDLE;
+            endcase
+        end
+    end
+endmodule

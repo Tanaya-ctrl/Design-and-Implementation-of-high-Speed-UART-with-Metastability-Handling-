@@ -1,0 +1,184 @@
+// ============================================================================
+// UART RECEIVER WITH METASTABILITY INJECTION FOR TESTING
+// ============================================================================
+module uart_rx #(
+    parameter CLOCK_FREQ = 100_010_000,
+    parameter BAUD_RATE = 4_000_000,
+    parameter DATA_BITS = 8,
+    parameter PARITY = "even",
+    parameter STOP_BITS = 1,
+    parameter INJECT_META = 0  // Set to 1 to inject metastability errors
+)(
+    input wire clk,
+    input wire rst,
+    input wire serial_in,
+    output reg [DATA_BITS-1:0] data_out,
+    output reg data_valid,
+    output reg parity_error
+);
+
+    // ========================================
+    // 2-STAGE SYNCHRONIZER FOR CDC
+    // ========================================
+    (* ASYNC_REG = "TRUE" *) reg sync_stage1;
+    (* ASYNC_REG = "TRUE" *) reg sync_stage2;
+    
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            sync_stage1 <= 1'b1;
+            sync_stage2 <= 1'b1;
+        end else begin
+            sync_stage1 <= serial_in;
+            sync_stage2 <= sync_stage1;
+        end
+    end  
+    
+    // ========================================
+    // METASTABILITY INJECTION FOR TESTING
+    // (Simulates what happens without proper synchronizer)
+    // ========================================
+    reg [31:0] error_inject_count;
+    reg inject_error;
+    
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            error_inject_count <= 0;
+            inject_error <= 0;
+        end else begin
+            error_inject_count <= error_inject_count + 1;
+            
+            // Inject random errors to simulate metastability
+            // ~10% error rate when INJECT_META is enabled
+            if (INJECT_META && ($random % 100 < 10)) begin
+                inject_error <= 1;
+            end else begin
+                inject_error <= 0;
+            end
+        end
+    end
+    
+    // Choose signal based on test mode
+    wire serial_in_sync = (INJECT_META == 0) ? sync_stage2 : 
+                          (inject_error ? ~sync_stage2 : sync_stage2);
+    
+    // ========================================
+    // UART RECEIVER LOGIC
+    // ========================================
+    localparam CLKS_PER_BIT = CLOCK_FREQ / BAUD_RATE;
+    localparam HALF_BIT = CLKS_PER_BIT / 2;
+    
+    localparam IDLE = 3'b000;
+    localparam START = 3'b001;
+    localparam DATA = 3'b010;
+    localparam PARITY_STATE = 3'b011;
+    localparam STOP = 3'b100;
+    
+    reg [2:0] state;
+    reg [15:0] clk_count;
+    reg [3:0] bit_index;
+    reg [DATA_BITS-1:0] rx_data;
+    reg calc_parity;
+    
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            state <= IDLE;
+            clk_count <= 0;
+            bit_index <= 0;
+            data_out <= 0;
+            data_valid <= 0;
+            parity_error <= 0;
+            rx_data <= 0;
+            calc_parity <= 0;
+        end else begin
+            data_valid <= 0;
+            
+            case (state)
+                IDLE: begin
+                    clk_count <= 0;
+                    bit_index <= 0;
+                    calc_parity <= 0;
+                    parity_error <= 0;
+                    
+                    if (serial_in_sync == 1'b0) begin
+                        state <= START;
+                        clk_count <= 0;
+                    end
+                end
+                
+                START: begin
+                    if (clk_count == HALF_BIT - 1) begin
+                        if (serial_in_sync == 1'b0) begin
+                            clk_count <= 0;
+                            state <= DATA;
+                        end else begin
+                            state <= IDLE;
+                        end
+                    end else begin
+                        clk_count <= clk_count + 1;
+                    end
+                end
+                
+                DATA: begin
+                    if (clk_count == CLKS_PER_BIT - 1) begin
+                        clk_count <= 0;
+                        
+                        rx_data[bit_index] <= serial_in_sync;
+                        
+                        if (PARITY == "even")
+                            calc_parity <= calc_parity ^ serial_in_sync;
+                        else if (PARITY == "odd")
+                            calc_parity <= calc_parity ^ serial_in_sync;
+                        
+                        if (bit_index == DATA_BITS - 1) begin
+                            bit_index <= 0;
+                            if (PARITY != "none")
+                                state <= PARITY_STATE;
+                            else
+                                state <= STOP;
+                        end else begin
+                            bit_index <= bit_index + 1;
+                        end
+                    end else begin
+                        clk_count <= clk_count + 1;
+                    end
+                end
+                
+                PARITY_STATE: begin
+                    if (clk_count == CLKS_PER_BIT - 1) begin
+                        clk_count <= 0;
+                        
+                        if (PARITY == "even") begin
+                            if ((calc_parity ^ serial_in_sync) != 1'b0)
+                                parity_error <= 1'b1;
+                        end else if (PARITY == "odd") begin
+                            if ((calc_parity ^ serial_in_sync) != 1'b1)
+                                parity_error <= 1'b1;
+                        end
+                        
+                        state <= STOP;
+                    end else begin
+                        clk_count <= clk_count + 1;
+                    end
+                end
+                
+                STOP: begin
+                    if (clk_count == CLKS_PER_BIT - 1) begin
+                        clk_count <= 0;
+                        
+                        data_out <= rx_data;
+                        data_valid <= 1'b1;
+                        
+                        state <= IDLE;
+                    end else begin
+                        clk_count <= clk_count + 1;
+                    end
+                end
+                
+                default: begin
+                    state <= IDLE;
+                end
+            endcase
+        end
+    end
+    
+endmodule
